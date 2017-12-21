@@ -1,0 +1,45 @@
+<!-- Set global base url for service call  -->
+<dom-module id="my-app-api">
+        <style>
+             :host {
+                display: none;
+            }
+        </style>
+        <template>
+            <content select="iron-ajax"></content>
+        </template>
+    </dom-module>
+    <script>
+        (function () {
+            Polymer({
+                is: 'my-app-api',
+                properties: {
+                    baseUrl: {
+                        type: String,
+                        value: 'https://infinite-meadow-22197.herokuapp.com',
+                        observer: '_activeChanged',
+                    }
+                },
+                _activeChanged: function () {
+                    this.updateUrlsAndSign();
+                },
+                updateUrlsAndSign: function () {
+                    var ajaxElements = Polymer.dom(this).querySelectorAll('iron-ajax');
+                    var ajaxElementsArray = [].slice.call(ajaxElements);
+                    ajaxElementsArray.forEach(function (ajax) {
+                        var urlAttr = ajax.getAttribute('url');
+                        if (!urlAttr) {
+                            return;
+                        }
+                        ajax.url = this.baseUrl + urlAttr.replace(window.location.origin, '');
+                        ajax.headers = ajax.headers || {};
+                        ajax.headers['Content-Type'] = 'application/json';
+                        ajax.headers = {
+                            "api_key": "c112f68c22a4b6ff1240e072f64677d155b3d05488bcf5c5194b88aef04ea765"
+                        };
+                    }.bind(this));
+    
+                }
+            });
+        })();
+    </script>

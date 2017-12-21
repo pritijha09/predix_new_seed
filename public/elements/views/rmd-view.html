@@ -1,0 +1,361 @@
+<link rel="import" href="../../bower_components/polymer/polymer.html">
+<link rel="import" href="../../bower_components/iron-ajax/iron-ajax.html">
+<link rel="import" href="../../bower_components/px-dropdown/px-dropdown.html">
+<link rel="import" href="../asset-browser/asset-browser.html">
+<link rel="import" href="../seed-table/seed-table.html">
+
+<link rel="import" href="rmd-view-styles.html">
+<script src="https://code.highcharts.com/highcharts.js"></script>
+<script src="https://code.highcharts.com/modules/series-label.js"></script>
+<script src="https://code.highcharts.com/modules/exporting.js"></script>
+<dom-module id="rmd-view">
+  <template>
+    <style include="rmd-view-styles"></style>
+
+    <div>
+      <asset-browser id="assetBrowser" asset-model="{{rmdAssetModel}}" opened-asset="{{openedAsset}}" asset-query-url="/api/predix-asset/asset"
+        asset-group-query-url="/api/predix-asset/group">
+      </asset-browser>
+    </div>
+
+    <div class="flex flex--row flex--justify">
+      <div><h1 class="delta u-pl++">Dashboard</h1></div>
+      <div>
+        <div class="flex flex--row flex--right">
+          <px-dropdown class="flex u-pr u-pt" id="refreshFrequencyDropdown" display-value="Refresh Frequency" 
+            items='[{"key":"0","val":"No Refresh"},{"key":"3","val":"Every 3 sec"},{"key":"15","val":"Every 15 sec"},{"key":"60","val":"Every 60 sec"}]'>
+          </px-dropdown>
+          <px-icon class="u-pr u-pt" id="refreshTableBtn" icon="px-nav:reload"></px-icon>
+        </div>
+      </div>
+    </div>
+
+    <div class="u-pb">
+      <kpi-bar datapoints="[[kpiDatapoints]]" overall-label="[[kpiOverallLabel]]" overall-value="[[kpiOverallValue]]" overall-max="[[kpiOverallMax]]"
+        kpi-bar-wrapper-state="[[kpiBarWrapperState]]">
+      </kpi-bar>
+    </div>
+    <iron-ajax id="kpiBarAjaxEl"></iron-ajax>
+
+    <!-- If the RMD datasource is not enabled, you can pass in an asset directly. -->
+    <!--<seed-table asset-data="{{openedAsset}}" show-asset-only="true"></seed-table>-->
+
+    <!-- If RMD datasource is enabled, call that and pass data to the table. -->
+    <seed-table id="seedTable" rmd-data="{{rmdTableData}}"></seed-table>
+    <iron-ajax id="datatableAjaxEl"></iron-ajax>
+
+    <timeseries-chart id="tsChart" ws-url="[[wsUrl]]" tags="{{displayTags}}" hidden$="{{!showTimeseriesChart}}"></timeseries-chart>
+    <div id="container" style="min-width: 310px; height: 400px; max-width: 800px; margin: 0 auto"></div>
+  </template>
+  <script>
+    Polymer({
+      is: 'rmd-view',
+      properties: {
+        rmdAssetModel: {
+          type: Object,
+          observer: '_assetModelChanged'
+        },
+        openedAsset: {
+          type: Object,
+          observer: '_openedAssetChanged'
+        },
+        rmdTableData: {
+          type: Object
+        },
+        displayTags: {
+          type: Array
+        },
+        showTimeseriesChart: {
+          type: Boolean,
+          value: false
+        },
+        wsUrl: {
+          type: String
+        },
+        kpiBarWrapperState: {
+          type: String
+        }
+      },
+
+      _formatTagsForDisplay: function (assetTag) {
+        var tags = []
+        Object.keys(assetTag).forEach(function (key) {
+          var tag = {
+            key: assetTag[key].timeseriesDatasource.tag,
+            val: assetTag[key].label,
+            unit: 'psi'
+          }
+          if (tag.key.indexOf('Temperature') > -1) {
+            tag.unit = 'F';
+          } else if (tag.key.indexOf('Ratio') > -1) {
+            tag.unit = '';
+          } else if (tag.key.indexOf('Velocity') > -1) {
+            tag.unit = 'm/s'
+          }
+          tags.push(tag);
+        });
+        return tags;
+      },
+      _openedAssetChanged: function (newVal) {
+        console.log('asset opened:', newVal);
+        this.$.datatableAjaxEl.url = "/api/datagrid" + newVal.uri;
+        this.$.kpiBarAjaxEl.url = this.$.datatableAjaxEl.url + '/summary';
+        this.$.datatableAjaxEl.generateRequest();
+        if (newVal.assetTag) {
+          this.displayTags = this._formatTagsForDisplay(newVal.assetTag);
+        }
+        this.showTimeseriesChart = newVal.uri.indexOf('asset') >= 0;
+      },
+      _assetModelChanged: function (newVal) {
+        console.log('asset model changed:', newVal);
+      },
+
+      // We'll load the timeseries-chart asynchronously, since it's pretty heavy.
+      _loadFragment: function (elementId, fragmentPath) {
+        if (Polymer.isInstance(this.$[elementId])) {
+          return;
+        }
+        Polymer.Base.importHref(fragmentPath, null, function () {
+          console.log('failed to load:', fragmentPath);
+        }, true);
+      },
+
+      ready: function () {
+
+
+
+        this._loadFragment('tsChart', '/elements/timeseries-chart/timeseries-chart.html');
+        // set copy of 'this' for callback function use below
+        var that = this;
+        // initialize refresh interval
+        this.refreshTimerInterval = 0;
+        this.wsUrl = document.querySelector('#view').elementData.wsUrl;
+
+        this.$.assetBrowser.addEventListener('px-app-asset-selected', function(evt) {
+          console.log('evt', evt);
+          this.openedAsset = evt.detail.item;
+        }.bind(this));
+
+        this.$.kpiBarAjaxEl.addEventListener('response', function (evt) {
+          var data = evt.detail.response;
+          if (Array.isArray(data)) {
+            data = data[0];
+          }
+          var kpis = data.kpis, overall = data.overall;
+          kpis.forEach(function(kpi) {
+            if (kpi.label && kpi.label.toLowerCase().indexOf('compressionratio') > -1) {
+              kpi.label = 'Compression Ratio (avg)';
+            }
+          });
+          this.kpiDatapoints = kpis;
+          this.kpiOverallLabel = overall.title;
+          this.kpiOverallValue = overall.percentage;
+          this.kpiOverallMax = "100";
+        }.bind(this));
+
+        this.$.datatableAjaxEl.addEventListener('response', function (evt) {
+          this.rmdTableData = evt.detail.response;
+          this.$.kpiBarWrapperState = 'kpi-bar-wrapper-waiting';
+          this.$.kpiBarAjaxEl.generateRequest();
+
+        }.bind(this));
+
+        // Set refresh  button behavior
+        this.$.refreshTableBtn.addEventListener('click', function () {
+          console.log('sending request for rmdData');
+          that.$.datatableAjaxEl.generateRequest();
+        });
+
+        // Set refresh dropdown behavior
+        this.$.refreshFrequencyDropdown.addEventListener('px-dropdown-selection-changed', function (evt) {
+          var interval = 0;
+          switch (evt.detail.key) {
+            case '3':
+              interval = 3000;  // every 3 seconds
+              break;
+            case '15':
+              interval = 15000;  // every 3 seconds
+              break;
+            case '60':
+              interval = 60000;  // every 60 seconds
+              break;
+          }
+          clearInterval(that.refreshTimerInterval);
+
+          // If no refresh selected, clear any existing interval
+          if (interval === 0) {
+            that.refreshTimerInterval = 0;
+          }
+          // else set interval according to user selection
+          else {
+            that.refreshTimerInterval = setInterval(function () {
+              console.log('sending request for rmdData');
+              that.$.datatableAjaxEl.generateRequest();
+            }, interval);
+          }
+        });
+ 
+//         Highcharts.chart('container', {
+//     chart: {
+//         type: 'scatter',
+//         zoomType: 'xy'
+//     },
+//     title: {
+//         text: 'Injection Rate'
+//     },
+//     xAxis: {
+//         title: {
+//             enabled: true,
+//             text: 'Steps'
+//         },
+//         startOnTick: true,
+//         endOnTick: true,
+//         showLastLabel: true
+//     },
+//     yAxis: {
+//         title: {
+//             text: 'Injection Rate (Mscf/Day)'
+//         }
+//     },
+   
+//     plotOptions: {
+//         scatter: {
+//             marker: {
+//                 radius: 5,
+//                 states: {
+//                     hover: {
+//                         enabled: true,
+//                         lineColor: 'rgb(100,100,100)'
+//                     }
+//                 }
+//             },
+//             states: {
+//                 hover: {
+//                     marker: {
+//                         enabled: false
+//                     }
+//                 }
+//             }
+//            // tooltip: {
+//              //   headerFormat: '<b>{series.name}</b><br>',
+//               //  pointFormat: '{point.x} cm, {point.y} kg'
+//             //}
+//         }
+//     },
+//     series: [{
+//         name: '"Well 1',
+//         color: 'blue',
+//         data: [ 221.15611957276468,
+//     222.0406065295736,
+//     222.8747364331206,
+//     223.65689416348386,
+//     224.38544284831042,
+//     225.05872371323585,
+//     225.675055902377,
+//     226.232736264621,
+//     226.73003910095576,
+//     227.16521586755835,
+//     227.53649482875304,
+//     227.84208065328306,
+//     228.080153946576,
+//     228.24887071082728,
+//     228.34636172375377,
+//     228.37073182576674,
+//     228.3200591040604,
+//     228.19239396068133,
+//     227.98575805001175,
+//     227.69814306922675,
+//     227.3275093831341,
+//     226.87178446233042,
+//     226.32886111074208,
+//     225.6965954553073,
+//     224.97280466669875,
+//     224.15526437549707,
+//     223.24170574296937,
+//     222.22981213944112,
+//     221.11721537598675,
+//     219.9014914265767,
+//     218.58015556762925,
+//     217.15065684976875,
+//     215.61037180206057,
+//     213.95659725151936,
+//     212.186542119588,
+//     210.29731803167084,
+//     208.28592854455854,
+//     206.14925675824747,
+//     203.88405103135622,
+//     201.4869084606209]
+
+//     }
+//     ]
+// });
+Highcharts.chart('container', {
+
+    title: {
+        text: 'Solar Employment Growth by Sector, 2010-2016'
+    },
+
+    subtitle: {
+        text: 'Source: thesolarfoundation.com'
+    },
+
+    yAxis: {
+        title: {
+            text: 'Number of Employees'
+        }
+    },
+    legend: {
+        layout: 'vertical',
+        align: 'right',
+        verticalAlign: 'middle'
+    },
+
+    plotOptions: {
+        series: {
+            label: {
+                connectorAllowed: false
+            },
+            pointStart: 2010
+        }
+    },
+
+    series: [{
+        name: 'Installation',
+        data: [43934, 52503, 57177, 69658, 97031, 119931, 137133, 154175]
+    }, {
+        name: 'Manufacturing',
+        data: [24916, 24064, 29742, 29851, 32490, 30282, 38121, 40434]
+    }, {
+        name: 'Sales & Distribution',
+        data: [11744, 17722, 16005, 19771, 20185, 24377, 32147, 39387]
+    }, {
+        name: 'Project Development',
+        data: [null, null, 7988, 12169, 15112, 22452, 34400, 34227]
+    }, {
+        name: 'Other',
+        data: [12908, 5948, 8105, 11248, 8989, 11816, 18274, 18111]
+    }],
+
+    responsive: {
+        rules: [{
+            condition: {
+                maxWidth: 500
+            },
+            chartOptions: {
+                legend: {
+                    layout: 'horizontal',
+                    align: 'center',
+                    verticalAlign: 'bottom'
+                }
+            }
+        }]
+    }
+
+});
+
+
+
+      }
+    });
+  </script>
+</dom-module>

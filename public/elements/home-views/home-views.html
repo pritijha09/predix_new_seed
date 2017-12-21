@@ -1,0 +1,37 @@
+<link rel="import" href="../home-views/home-views.html">
+<link rel="import" href="../myapp-api/myapp-api.html">
+<link rel="import" href="../../bower_components/px-spinner/px-spinner.html" />
+<!-- jQuery library -->
+<!-- Latest compiled JavaScript -->
+<script type="text/javascript" src="../../js/jquery.min.js"></script>
+<script type="text/javascript" src="../../js/Chart.bundle.js"></script>
+<script type="text/javascript" src="../../js/utils.js"></script>
+<script type="text/javascript" src="../../js/analytics.js"></script>
+<script type="text/javascript" src="../../js/bootstrap.min.js"></script>
+<style>
+   .spinner-own {
+        position: fixed;
+        top: 0;
+        z-index: 99999;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: #fff;
+        text-align: center;
+    }
+</style>
+<dom-module id="home-views">
+  <template>
+      <my-app-api>
+          <iron-ajax method="GET" url="/newdata" handle-as="json"  last-response="{{response}}"
+            content-type="application/json"   auto>
+          </iron-ajax>
+      </my-app-api>
+      <div class="spinner-own">
+          <px-spinner size="100" id="spinner"></px-spinner>
+      </div>
+  </template>
+<script src="home.js">
+   
+</script>
+</dom-module>
